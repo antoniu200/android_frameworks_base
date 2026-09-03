@@ -72,10 +72,10 @@ class AutomaticBrightnessController {
 
     // Length of the ambient light horizon used to calculate the long term estimate of ambient
     // light.
-    private static final int AMBIENT_LIGHT_LONG_HORIZON_MILLIS = 1000;
+    private static final int AMBIENT_LIGHT_LONG_HORIZON_MILLIS = 10000;
 
     // Length of the ambient light horizon used to calculate short-term estimate of ambient light.
-    private static final int AMBIENT_LIGHT_SHORT_HORIZON_MILLIS = 1000;
+    private static final int AMBIENT_LIGHT_SHORT_HORIZON_MILLIS = 2000;
 
     // Callbacks for requesting updates to the display's power state
     private final Callbacks mCallbacks;
