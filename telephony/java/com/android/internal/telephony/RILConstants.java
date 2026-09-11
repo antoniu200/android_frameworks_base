@@ -530,6 +530,8 @@ public interface RILConstants {
     int RIL_REQUEST_GET_SLICING_CONFIG = 224;
     int RIL_REQUEST_ENABLE_VONR = 225;
     int RIL_REQUEST_IS_VONR_ENABLED = 225;
+    
+    int RIL_REQUEST_SOMC_HOOK_RAW = 501;
 
     /* Responses begin */
     int RIL_RESPONSE_ACKNOWLEDGEMENT = 800;
