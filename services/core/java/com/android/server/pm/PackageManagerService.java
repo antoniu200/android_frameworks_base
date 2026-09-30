@@ -156,6 +156,7 @@ import android.compat.annotation.ChangeId;
 import android.compat.annotation.EnabledAfter;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
+import android.content.ContentProvider;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.IIntentReceiver;
@@ -2380,11 +2381,11 @@ public class PackageManagerService extends IPackageManager.Stub
                 String resolvedType, int flags, int userId, int callingUid,
                 boolean includeInstantApps) {
             if (!mUserManager.exists(userId)) return Collections.emptyList();
-            enforceCrossUserOrProfilePermission(callingUid,
+            enforceCrossUserOrProfilePermission(Binder.getCallingUid(),
                     userId,
                     false /*requireFullPermission*/,
                     false /*checkShell*/,
-                    "query intent receivers");
+                    "query intent services");
             final String instantAppPkgName = getInstantAppPackageName(callingUid);
             flags = updateFlagsForResolve(flags, userId, callingUid, includeInstantApps,
                     false /* isImplicitImageCaptureIntentAndNotSetByDpc */);
@@ -4089,10 +4090,10 @@ public class PackageManagerService extends IPackageManager.Stub
                 return true;
             }
             if (requireFullPermission) {
-                return hasPermission(Manifest.permission.INTERACT_ACROSS_USERS_FULL);
+                return hasPermission(Manifest.permission.INTERACT_ACROSS_USERS_FULL, callingUid);
             }
-            return hasPermission(android.Manifest.permission.INTERACT_ACROSS_USERS_FULL)
-                    || hasPermission(Manifest.permission.INTERACT_ACROSS_USERS);
+            return hasPermission(android.Manifest.permission.INTERACT_ACROSS_USERS_FULL, callingUid)
+                    || hasPermission(Manifest.permission.INTERACT_ACROSS_USERS, callingUid);
         }
 
         /**
@@ -4105,6 +4106,11 @@ public class PackageManagerService extends IPackageManager.Stub
 
         private boolean hasPermission(String permission) {
             return mContext.checkCallingOrSelfPermission(permission)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+
+        private boolean hasPermission(String permission, int uid) {
+            return mContext.checkPermission(permission, /* pid= */ -1, uid)
                     == PackageManager.PERMISSION_GRANTED;
         }
 
@@ -11664,7 +11670,7 @@ public class PackageManagerService extends IPackageManager.Stub
         final boolean listUninstalled = (flags & MATCH_KNOWN_PACKAGES) != 0;
 
         enforceCrossUserPermission(
-            callingUid,
+            Binder.getCallingUid(),
             userId,
             false /* requireFullPermission */,
             false /* checkShell */,
@@ -11873,9 +11879,17 @@ public class PackageManagerService extends IPackageManager.Stub
 
     private ProviderInfo resolveContentProviderInternal(String name, int flags, int userId,
             int callingUid) {
+
+        // Callers of this API may not always separate the userID and authority. Let's parse it
+        // before resolving
+        String authorityWithoutUserId = ContentProvider.getAuthorityWithoutUserId(name);
+        userId = ContentProvider.getUserIdFromAuthority(name, userId);
+
         if (!mUserManager.exists(userId)) return null;
         flags = updateFlagsForComponent(flags, userId);
-        final ProviderInfo providerInfo = mComponentResolver.queryProvider(name, flags, userId);
+
+        final ProviderInfo providerInfo = mComponentResolver.queryProvider(
+                authorityWithoutUserId, flags, userId);
         boolean checkedGrants = false;
         if (providerInfo != null) {
             // Looking for cross-user grants before enforcing the typical cross-users permissions
@@ -16167,9 +16181,11 @@ public class PackageManagerService extends IPackageManager.Stub
                 if (shouldFilterApplicationLocked(pkgSetting, callingUid, userId)) {
                     return false;
                 }
-                // Do not allow "android" is being disabled
-                if ("android".equals(packageName)) {
-                    Slog.w(TAG, "Cannot hide package: android");
+            // Don't allow hiding "android" or SysUI as it makes device unusable.
+            if ("android".equals(packageName)
+                    || LocalServices.getService(PackageManagerInternal.class)
+                            .getSystemUiServiceComponent().getPackageName().equals(packageName)) {
+                Slog.w(TAG, "Cannot hide package: " + packageName);
                     return false;
                 }
                 // Cannot hide static shared libs as they are considered
@@ -22752,7 +22768,8 @@ public class PackageManagerService extends IPackageManager.Stub
 
     @Override
     public void clearApplicationUserData(final String packageName,
-            final IPackageDataObserver observer, final int userId) {
+            final IPackageDataObserver observer, final int userId,
+            boolean restorePregrantedPermissions) {
         mContext.enforceCallingOrSelfPermission(
                 android.Manifest.permission.CLEAR_APP_USER_DATA, null);
 
@@ -22778,7 +22795,8 @@ public class PackageManagerService extends IPackageManager.Stub
                     try (PackageFreezer freezer = freezePackage(packageName,
                             "clearApplicationUserData")) {
                         synchronized (mInstallLock) {
-                            succeeded = clearApplicationUserDataLIF(packageName, userId);
+                            succeeded = clearApplicationUserDataLIF(packageName, userId,
+                                    restorePregrantedPermissions);
                         }
                         synchronized (mLock) {
                             mInstantAppRegistry.deleteInstantApplicationMetadataLPw(
@@ -22813,7 +22831,8 @@ public class PackageManagerService extends IPackageManager.Stub
         });
     }
 
-    private boolean clearApplicationUserDataLIF(String packageName, int userId) {
+    private boolean clearApplicationUserDataLIF(String packageName, int userId,
+                    boolean restorePregrantedPermissions) {
         if (packageName == null) {
             Slog.w(TAG, "Attempt to delete null packageName.");
             return false;
@@ -22835,7 +22854,7 @@ public class PackageManagerService extends IPackageManager.Stub
             Slog.w(TAG, "Package named '" + packageName + "' doesn't exist.");
             return false;
         }
-        mPermissionManager.resetRuntimePermissions(pkg, userId);
+        mPermissionManager.resetRuntimePermissions(pkg, userId, restorePregrantedPermissions);
 
         clearAppDataLIF(pkg, userId,
                 FLAG_STORAGE_DE | FLAG_STORAGE_CE | FLAG_STORAGE_EXTERNAL);
@@ -23275,7 +23294,7 @@ public class PackageManagerService extends IPackageManager.Stub
                 final int numPackages = mPackages.size();
                 for (int i = 0; i < numPackages; i++) {
                     final AndroidPackage pkg = mPackages.valueAt(i);
-                    mPermissionManager.resetRuntimePermissions(pkg, userId);
+                    mPermissionManager.resetRuntimePermissions(pkg, userId, true);
                 }
             }
             updateDefaultHomeNotLocked(userId);

@@ -41,10 +41,12 @@ import static org.junit.Assert.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Binder;
 import android.os.IBinder;
@@ -57,6 +59,7 @@ import android.view.InsetsState;
 import android.view.InsetsVisibilities;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.WindowManagerGlobal;
 
 import androidx.test.filters.SmallTest;
 
@@ -272,5 +275,240 @@ public class WindowManagerServiceTests extends WindowTestsBase {
 
         verify(mWm.mWindowContextListenerController, never()).registerWindowContainerListener(any(),
                 any(), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    public void testRelayout_addTrustedOverlay_permissionDenied() {
+        testRelayoutFlagChanges(
+                false, /* firstRelayout */
+                0, /* startFlags */
+                0, /* startPrivateFlags */
+                0, /* newFlags */
+                PRIVATE_FLAG_TRUSTED_OVERLAY, /* newPrivateFlags */
+                0, /* expectedChangedFlags */
+                0, /* expectedChangedPrivateFlags */
+                0, /* expectedFlagsValue */
+                0, /* expectedPrivateFlagsValue */
+                false, /* internalSystemWindowGranted */
+                true /* manageActivityTasksGranted */);
+    }
+
+    @Test
+    public void testRelayout_addTrustedOverlay_permissionGranted() {
+        testRelayoutFlagChanges(
+                false, /* firstRelayout */
+                0, /* startFlags */
+                0, /* startPrivateFlags */
+                0, /* newFlags */
+                PRIVATE_FLAG_TRUSTED_OVERLAY, /* newPrivateFlags */
+                0, /* expectedChangedFlags */
+                PRIVATE_FLAG_TRUSTED_OVERLAY, /* expectedChangedPrivateFlags */
+                0, /* expectedFlagsValue */
+                PRIVATE_FLAG_TRUSTED_OVERLAY /* expectedPrivateFlagsValue */,
+                true, /* internalSystemWindowGranted */
+                true /* manageActivityTasksGranted */);
+    }
+
+    @Test
+    public void testRelayout_addRoundedCornersOverlay_permissionDenied() {
+        testRelayoutFlagChanges(
+                false, /* firstRelayout */
+                0, /* startFlags */
+                0, /* startPrivateFlags */
+                0, /* newFlags */
+                PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY, /* newPrivateFlags */
+                0, /* expectedChangedFlags */
+                0, /* expectedChangedPrivateFlags */
+                0, /* expectedFlagsValue */
+                0, /* expectedPrivateFlagsValue */
+                false, /* internalSystemWindowGranted */
+                true /* manageActivityTasksGranted */);
+    }
+
+    @Test
+    public void testRelayout_addRoundedCornersOverlay_permissionGranted() {
+        testRelayoutFlagChanges(
+                false, /* firstRelayout */
+                0, /* startFlags */
+                0, /* startPrivateFlags */
+                0, /* newFlags */
+                PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY, /* newPrivateFlags */
+                0, /* expectedChangedFlags */
+                PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY, /* expectedChangedPrivateFlags */
+                0, /* expectedFlagsValue */
+                PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY /* expectedPrivateFlagsValue */,
+                true, /* internalSystemWindowGranted */
+                true /* manageActivityTasksGranted */);
+    }
+
+    @Test
+    public void testRelayout_addInterceptGlobalDragAndDrop_permissionDenied() {
+        testRelayoutFlagChanges(
+                false, /* firstRelayout */
+                0, /* startFlags */
+                0, /* startPrivateFlags */
+                0, /* newFlags */
+                PRIVATE_FLAG_INTERCEPT_GLOBAL_DRAG_AND_DROP, /* newPrivateFlags */
+                0, /* expectedChangedFlags */
+                0, /* expectedChangedPrivateFlags */
+                0, /* expectedFlagsValue */
+                0, /* expectedPrivateFlagsValue */
+                true, /* internalSystemWindowGranted */
+                false /* manageActivityTasksGranted */);
+    }
+
+    @Test
+    public void testRelayout_addInterceptGlobalDragAndDrop_permissionGranted() {
+        testRelayoutFlagChanges(
+                false, /* firstRelayout */
+                0, /* startFlags */
+                0, /* startPrivateFlags */
+                0, /* newFlags */
+                PRIVATE_FLAG_INTERCEPT_GLOBAL_DRAG_AND_DROP, /* newPrivateFlags */
+                0, /* expectedChangedFlags */
+                PRIVATE_FLAG_INTERCEPT_GLOBAL_DRAG_AND_DROP, /* expectedChangedPrivateFlags */
+                0, /* expectedFlagsValue */
+                PRIVATE_FLAG_INTERCEPT_GLOBAL_DRAG_AND_DROP /* expectedPrivateFlagsValue */,
+                true, /* internalSystemWindowGranted */
+                true /* manageActivityTasksGranted */);
+    }
+
+    private void testRelayoutFlagChanges(boolean firstRelayout, int startFlags,
+            int startPrivateFlags, int newFlags, int newPrivateFlags, int expectedChangedFlags,
+            int expectedChangedPrivateFlags, int expectedFlagsValue,
+            int expectedPrivateFlagsValue) {
+            testRelayoutFlagChanges(firstRelayout, startFlags, startPrivateFlags, newFlags,
+                    newPrivateFlags, expectedChangedFlags, expectedChangedPrivateFlags,
+                    expectedFlagsValue, expectedPrivateFlagsValue,
+                    true /* internalSystemWindowGranted */,
+                    true /* manageActivityTasksGranted */);
+    }
+
+    // Helper method to test relayout of a window, either for the initial layout, or a subsequent
+    // one, and makes sure that the flags and private flags changes and final values are properly
+    // reported to mDwpcHelper.keepActivityOnWindowFlagsChanged.
+    private void testRelayoutFlagChanges(boolean firstRelayout, int startFlags,
+            int startPrivateFlags, int newFlags, int newPrivateFlags, int expectedChangedFlags,
+            int expectedChangedPrivateFlags, int expectedFlagsValue,
+            int expectedPrivateFlagsValue, boolean internalSystemWindowGranted,
+            boolean manageActivityTasksGranted) {
+        final WindowState win = newWindowBuilder("appWin", TYPE_BASE_APPLICATION).build();
+        win.mRelayoutCalled = !firstRelayout;
+        mWm.mWindowMap.put(win.mClient.asBinder(), win);
+        spyOn(mDisplayContent.mDwpcHelper);
+        when(mDisplayContent.mDwpcHelper.hasController()).thenReturn(true);
+
+        doReturn(internalSystemWindowGranted ? PackageManager.PERMISSION_GRANTED
+                : PackageManager.PERMISSION_DENIED).when(mWm.mContext).checkPermission(
+                eq(android.Manifest.permission.INTERNAL_SYSTEM_WINDOW), anyInt(), anyInt());
+        doReturn(manageActivityTasksGranted ? PackageManager.PERMISSION_GRANTED
+                : PackageManager.PERMISSION_DENIED).when(mWm.mContext).checkPermission(
+                eq(android.Manifest.permission.MANAGE_ACTIVITY_TASKS), anyInt(), anyInt());
+
+        win.mAttrs.flags = startFlags;
+        win.mAttrs.privateFlags = startPrivateFlags;
+
+        LayoutParams newParams = new LayoutParams();
+        newParams.copyFrom(win.mAttrs);
+        newParams.flags = newFlags;
+        newParams.privateFlags = newPrivateFlags;
+
+        int seq = 1;
+        if (!firstRelayout) {
+            win.mRelayoutSeq = 1;
+            seq = 2;
+        }
+        mWm.relayoutWindow(win.mSession, win.mClient, newParams, 100, 200, View.VISIBLE, 0, seq,
+                0, new WindowRelayoutResult(), new SurfaceControl());
+
+        ArgumentCaptor<Integer> changedFlags = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> changedPrivateFlags = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> flagsValue = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> privateFlagsValue = ArgumentCaptor.forClass(Integer.class);
+
+        if (!firstRelayout && expectedChangedFlags == 0 && expectedChangedPrivateFlags == 0) {
+            verify(mDisplayContent.mDwpcHelper, never()).keepActivityOnWindowFlagsChanged(
+                    any(ActivityInfo.class), anyInt(), anyInt(), anyInt(), anyInt());
+            return;
+        }
+
+        verify(mDisplayContent.mDwpcHelper).keepActivityOnWindowFlagsChanged(
+                any(ActivityInfo.class), changedFlags.capture(), changedPrivateFlags.capture(),
+                flagsValue.capture(), privateFlagsValue.capture());
+
+        assertThat(changedFlags.getValue()).isEqualTo(expectedChangedFlags);
+        assertThat(changedPrivateFlags.getValue()).isEqualTo(expectedChangedPrivateFlags);
+        assertThat(flagsValue.getValue()).isEqualTo(expectedFlagsValue);
+        assertThat(privateFlagsValue.getValue()).isEqualTo(expectedPrivateFlagsValue);
+    }
+
+    @Test
+    public void testAddToastWindow_singleWindowPerToken() {
+        final IBinder token = new Binder();
+        mWm.addWindowToken(token, TYPE_TOAST, DEFAULT_DISPLAY, null /* options */);
+
+        final int uid1 = 1234;
+        final int pid1 = 1234;
+        final Session session1 = createTestSession(mAtm, pid1, uid1);
+        final WindowManager.LayoutParams params1 = new WindowManager.LayoutParams(TYPE_TOAST);
+        params1.token = token;
+        params1.packageName = "test1";
+
+        final ApplicationInfo appInfo1 = new ApplicationInfo();
+        appInfo1.targetSdkVersion = android.os.Build.VERSION_CODES.O;
+        doReturn(appInfo1)
+                .when(mWm.mPmInternal)
+                .getApplicationInfo(eq("test1"), anyLong(), anyInt(), anyInt());
+        doReturn(true).when(mWm.mPmInternal).isSameApp(eq("test1"), eq(uid1), anyInt());
+
+        final IWindow client1 = new TestIWindow();
+        final int res1 =
+                mWm.addWindow(
+                        session1,
+                        client1,
+                        params1,
+                        View.VISIBLE,
+                        DEFAULT_DISPLAY,
+                        0 /* requestUserId */,
+                        WindowInsets.Type.defaultVisible(),
+                        null,
+                        new InsetsState(),
+                        new InsetsSourceControl.Array(),
+                        new Rect(),
+                        new float[1]);
+        assertThat(res1).isAtLeast(WindowManagerGlobal.ADD_OKAY);
+
+        // Add second window with same token but different UID to bypass the canAddToastWindowForUid
+        // check
+        final int uid2 = 1235;
+        final int pid2 = 1235;
+        final Session session2 = createTestSession(mAtm, pid2, uid2);
+        final WindowManager.LayoutParams params2 = new WindowManager.LayoutParams(TYPE_TOAST);
+        params2.token = token;
+        params2.packageName = "test2";
+
+        final ApplicationInfo appInfo2 = new ApplicationInfo();
+        appInfo2.targetSdkVersion = android.os.Build.VERSION_CODES.O;
+        doReturn(appInfo2)
+                .when(mWm.mPmInternal)
+                .getApplicationInfo(eq("test2"), anyLong(), anyInt(), anyInt());
+        doReturn(true).when(mWm.mPmInternal).isSameApp(eq("test2"), eq(uid2), anyInt());
+
+        final IWindow client2 = new TestIWindow();
+        final int res2 =
+                mWm.addWindow(
+                        session2,
+                        client2,
+                        params2,
+                        View.VISIBLE,
+                        DEFAULT_DISPLAY,
+                        0 /* requestUserId */,
+                        WindowInsets.Type.defaultVisible(),
+                        null,
+                        new InsetsState(),
+                        new InsetsSourceControl.Array(),
+                        new Rect(),
+                        new float[1]);
+        assertThat(res2).isEqualTo(WindowManagerGlobal.ADD_BAD_APP_TOKEN);
     }
 }
