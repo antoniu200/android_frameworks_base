@@ -85,6 +85,19 @@ class AutomaticBrightnessController {
 
     // The light sensor, or null if not available or needed.
     private final Sensor mLightSensor;
+    
+    // Maximum distance, in centimeters, below which the proximity sensor is considered covered.
+    private static final float TYPICAL_PROXIMITY_THRESHOLD = 5.0f;
+    
+    // The proximity sensor, or null if not available or needed.
+    private final Sensor mProximitySensor;
+    
+    // Maximum distance, in centimeters, below which the proximity sensor is considered covered.
+    // Limited by TYPICAL_PROXIMITY_THRESHOLD or the sensor's maximum range, whichever is smaller.
+    private final float mProximityThreshold;
+    
+    // True if sensor is currently considered covered.
+    private boolean mIsNear;
 
     // The mapper to translate ambient lux to screen brightness in the range [0, 1.0].
     private final BrightnessMappingStrategy mBrightnessMapper;
@@ -246,6 +259,16 @@ class AutomaticBrightnessController {
         mContext = context;
         mCallbacks = callbacks;
         mSensorManager = sensorManager;
+        mProximitySensor = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+        
+        if (mProximitySensor != null) {
+            mProximityThreshold = Math.min(
+                    mProximitySensor.getMaximumRange(),
+                    TYPICAL_PROXIMITY_THRESHOLD);
+        } else {
+            mProximityThreshold = TYPICAL_PROXIMITY_THRESHOLD;
+        }
+        
         mBrightnessMapper = mapper;
         mScreenBrightnessRangeMinimum = brightnessMin;
         mScreenBrightnessRangeMaximum = brightnessMax;
@@ -506,6 +529,8 @@ class AutomaticBrightnessController {
                 registerForegroundAppUpdater();
                 mSensorManager.registerListener(mLightSensorListener, mLightSensor,
                         mCurrentLightSensorRate * 1000, mHandler);
+                mSensorManager.registerListener(mProximitySensorListener, mProximitySensor,
+                        SensorManager.SENSOR_DELAY_NORMAL, mHandler);
                 return true;
             }
         } else if (mLightSensorEnabled) {
@@ -518,6 +543,9 @@ class AutomaticBrightnessController {
             mHandler.removeMessages(MSG_UPDATE_AMBIENT_LUX);
             unregisterForegroundAppUpdater();
             mSensorManager.unregisterListener(mLightSensorListener);
+            
+            mIsNear = false;
+            mSensorManager.unregisterListener(mProximitySensorListener);
         }
         return false;
     }
@@ -962,11 +990,30 @@ class AutomaticBrightnessController {
             }
         }
     }
+    
+    private final SensorEventListener mProximitySensorListener = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            if (mLightSensorEnabled) {
+                final float distance = event.values[0];
+                mIsNear = distance >= 0.0f && distance < mProximityThreshold;
+            }
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+            // Not used.
+        }
+    };
 
     private final SensorEventListener mLightSensorListener = new SensorEventListener() {
         @Override
         public void onSensorChanged(SensorEvent event) {
             if (mLightSensorEnabled) {
+                if (mAmbientLuxValid && mIsNear) {
+                    return;
+                }
+            
                 final long time = SystemClock.uptimeMillis();
                 final float lux = event.values[0];
                 handleLightSensorEvent(time, lux);

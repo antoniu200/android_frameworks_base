@@ -633,6 +633,13 @@ public class CarrierConfigManager {
      */
     public static final String
             KEY_FORCE_HOME_NETWORK_BOOL = "force_home_network_bool";
+            
+    /**
+     * Whether the Sony APN profile switch mechanism is enabled.
+     * @hide
+     */
+    public static final String
+            KEY_SOMC_ENABLE_APN_SWITCH_BOOL = "s_enable_apn_switch";
 
     /**
      * Flag specifying whether VoLTE should be available for carrier, independent of carrier
@@ -5412,6 +5419,7 @@ public class CarrierConfigManager {
         sDefaults.putBoolean(KEY_APN_EXPAND_BOOL, true);
         sDefaults.putBoolean(KEY_AUTO_RETRY_ENABLED_BOOL, false);
         sDefaults.putBoolean(KEY_CARRIER_SETTINGS_ENABLE_BOOL, false);
+        sDefaults.putBoolean(KEY_SOMC_ENABLE_APN_SWITCH_BOOL, true);
         sDefaults.putBoolean(KEY_CARRIER_VOLTE_AVAILABLE_BOOL, false);
         sDefaults.putBoolean(KEY_CARRIER_VT_AVAILABLE_BOOL, false);
         sDefaults.putInt(KEY_CARRIER_USSD_METHOD_INT, USSD_OVER_CS_PREFERRED);
