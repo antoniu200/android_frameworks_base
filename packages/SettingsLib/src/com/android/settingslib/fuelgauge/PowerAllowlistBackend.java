@@ -77,15 +77,7 @@ public class PowerAllowlistBackend {
      * Check if target package is in allow list
      */
     public boolean isAllowlisted(String pkg) {
-        if (mAllowlistedApps.contains(pkg)) {
-            return true;
-        }
-
-        if (isDefaultActiveApp(pkg)) {
-            return true;
-        }
-
-        return false;
+        return mAllowlistedApps.contains(pkg);
     }
 
     /**
